@@ -142,4 +142,52 @@ class FredClient:
                 logger.warning("Skipping %s: %s", sid, exc)
         return results
     
+
+
+    @staticmethod
+    def _default_start() -> str:
+        ten_years_ago = datetime.today() - timedelta(days=365 * DEFULT_LOOKBACK_YEARS)
+        return ten_years_ago.strftime("%Y-%m-%d")
     
+    @staticmethod
+    def _to_dataframe(series: pd.Series) -> pd.DataFrame:
+        df = series.reset_index()
+        df.columns = ["date", "value"]
+        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.dropna(subset=["value"]).sort_values("date").reset_index(drop=True)
+        return df
+    
+
+    def _cache_path(self, cache_key: str) -> Optional[Path]:
+        if self._cache_dir is None:
+            return None
+        safe_key = cache_key.replace("/", "_").replace(" ", "_")
+        return self._cache_dir / f"{safe_key}.json"
+    
+    def _load_cache(self, cache_key: str) -> Optional[pd.DataFrame]:
+        path = self._cache_path(cache_key)
+        if path is None or not path.exists():
+            return None
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            df = pd.DataFrame(data)
+            df["date"] = pd.to_datetime(df["date"])
+            df["value"] = pd.to_numeric(df["value"])
+            return df
+        except Exception as exc:
+            logger.warning("Failed to load cache for %s: %s", cache_key, exc)
+            return None
+        
+    def _save_cache(self, cache_key: str, df: pd.DataFrame) -> None:
+        path = self._cache_path(cache_key)
+        if path is None:
+            return
+        try:
+            records = df.copy()
+            records["date"] = records["date"].dt.strftime("%Y-%m-%d")
+            path.write_text(json.dumps(records.to_dict(orient="records"), indent=2))
+            logger.debug("Cached: %s", path)
+        except Exception as exc:
+            logger.warning("Failed to save cache for %s: %s", cache_key, exc)
